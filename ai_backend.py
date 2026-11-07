@@ -50,9 +50,11 @@ def groq_chat(messages: list[dict], model: str | None = None,
         "stream": False,
     }).encode("utf-8")
     request = Request(GROQ_URL, data=payload, headers={
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-    }, method="POST")
+    "Authorization": f"Bearer {key}",
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "User-Agent": "FinancialResearchAI/1.0",
+}, method="POST")
     try:
         with urlopen(request, timeout=timeout) as response:
             data = json.load(response)
