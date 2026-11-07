@@ -1,8 +1,4 @@
-"""Financial Research AI — local document Q&A using Streamlit, FAISS and Ollama.
-
-Compatible with the Day 2 finance_ai environment on an Intel Mac.
-Ollama must be installed separately and a local model downloaded.
-"""
+"""Financial Research AI — Streamlit, FAISS and local or cloud LLM inference."""
 from __future__ import annotations
 
 import hashlib
@@ -21,6 +17,7 @@ from sec_financials import lookup_ticker, get_company_data, annual_financials, l
 from finance_analytics import compute_financial_ratios, simple_cashflow_dcf, financial_prompt_context
 from financial_guardrails import verified_answer, explain_previous_calculation, resolve_followup_question, determine_metric, interpret_previous_metric
 from history_store import save_session, list_sessions
+from ai_backend import get_groq_key, groq_chat, groq_model, groq_key_configured
 from pdf_retrieval import (
     wants_new_findings, broad_findings_question, topic_queries,
     select_diverse_passages, prior_answer_summary, repeated_answer, passage_key,
@@ -175,12 +172,18 @@ def generate_answer(question: str, passages, model_name: str, history, *, novelt
         + (f"PREVIOUS ANSWERS — FOR EXCLUSION ONLY:\n{prior}\n\n" if novelty and prior else "")
         + f"CURRENT SOURCE EXCERPTS:\n{context}"
     )
+    messages = [
+        {"role": "system", "content": instructions},
+        {"role": "user", "content": question_context},
+    ]
+    if get_groq_key():
+        answer = groq_chat(messages, model_name, max_tokens=650, temperature=0.05)
+        if not answer:
+            raise RuntimeError("Hosted model returned an empty answer.")
+        return answer
     result = ollama_request(
         "/api/chat",
-        {"model": model_name, "messages": [
-            {"role": "system", "content": instructions},
-            {"role": "user", "content": question_context},
-        ], "stream": False,
+        {"model": model_name, "messages": messages, "stream": False,
          "options": {"temperature": 0.05, "num_ctx": 4096, "num_predict": 650}},
         timeout=300,
     )
@@ -203,23 +206,27 @@ def show_sources(passages, key_prefix):
 
 with st.sidebar:
     st.title("⚙️ Research settings")
-    st.caption("Local RAG • FAISS + Ollama")
-    try:
-        models = ollama_request("/api/tags", timeout=3).get("models", [])
-        names = [m.get("name", "") for m in models if m.get("name")]
-        if names:
-            st.success("Ollama is connected")
-            selected = st.selectbox("Local AI model", names,
-                                    index=names.index(DEFAULT_MODEL) if DEFAULT_MODEL in names else 0)
-        else:
-            st.warning("Ollama running, but no models downloaded.")
+    st.caption("RAG • FAISS + AI")
+    if groq_key_configured():
+        st.success("Cloud AI configured (Groq)")
+        selected = groq_model()
+        st.caption(f"Hosted model: `{selected}`")
+    else:
+        try:
+            models = ollama_request("/api/tags", timeout=3).get("models", [])
+            names = [m.get("name", "") for m in models if m.get("name")]
+            if names:
+                st.success("Local Ollama connected")
+                selected = st.selectbox("Local AI model", names,
+                                        index=names.index(DEFAULT_MODEL) if DEFAULT_MODEL in names else 0)
+            else:
+                st.warning("Ollama running, but no models downloaded.")
+                selected = st.text_input("Model", DEFAULT_MODEL)
+        except Exception:
+            st.warning("AI not connected. Set GROQ_API_KEY in cloud secrets or start Ollama locally.")
             selected = st.text_input("Model", DEFAULT_MODEL)
-    except Exception:
-        st.warning("Ollama not connected yet")
-        st.caption("Install Ollama, open it, then run `ollama pull qwen2.5:1.5b` in Terminal.")
-        selected = st.text_input("Model", DEFAULT_MODEL)
     top_k = st.slider("Retrieved passages", min_value=3, max_value=8, value=5)
-    st.caption("A small model is suitable for an Intel Mac but may be slow or make mistakes. Always verify financial figures.")
+    st.caption("AI answers can be wrong. Verify every financial figure against the source.")
     if st.button("Clear conversation", width="stretch"):
         st.session_state.messages = []
         st.rerun()
@@ -249,7 +256,7 @@ with st.sidebar:
             st.caption(f"#{item['id']} · {item['kind'].upper()} · {item['label']} · {item['created_utc'][:10]}")
 
 st.title("📈 Financial Research AI")
-st.caption("Ask annual-report questions and get readable AI answers with PDF page evidence • Runs locally using Ollama")
+st.caption("Ask annual-report questions with PDF evidence • SEC analytics + local or cloud AI")
 
 
 def pdf_chat_tab():
@@ -304,7 +311,7 @@ def pdf_chat_tab():
             st.markdown(question)
         st.session_state.messages.append({"role": "user", "content": question})
         with st.chat_message("assistant"):
-            with st.spinner("Searching report and asking your local AI…"):
+            with st.spinner("Searching the report and generating an answer…"):
                 wants_new = wants_new_findings(question)
                 passages = retrieve_pdf_passages(question, previous_messages, chunks, index, top_k)
                 try:
@@ -320,10 +327,9 @@ def pdf_chat_tab():
                                       "capital allocation, net inflows, expenses or acquisitions. "
                                       "The newly retrieved excerpts are available below.")
                 except Exception as exc:
-                    answer = ("**AI answer unavailable.** The semantic search worked, but Ollama "
-                              f"couldn't generate a response.\n\n`{str(exc)[:500]}`\n\n"
-                              "Your supporting excerpts are available below. "
-                              "Check that Ollama is open and that the chosen model is downloaded.")
+                    answer = ("**AI answer unavailable.** Retrieval worked, but the language model "
+                              f"could not generate an answer.\n\n`{str(exc)[:250]}`\n\n"
+                              "Supporting excerpts are below. Check hosted API settings or local Ollama.")
             st.markdown(answer)
             show_sources(passages, "new")
         st.session_state.messages.append({"role": "assistant", "content": answer, "sources": passages})
@@ -414,7 +420,7 @@ def sec_financials_tab():
     st.dataframe(ratio_df, width="stretch", hide_index=True, column_config=ratio_columns)
 
     st.subheader("💬 Ask about this company's financials")
-    st.caption("Ask follow-up questions using structured SEC figures. Ollama explains the data; always verify calculations against the Python table above.")
+    st.caption("Ask questions using structured SEC figures. AI explains the data; Python calculates ratios.")
     if st.session_state.get("sec_chat_ticker") != company['ticker']:
         st.session_state.sec_chat_ticker = company['ticker']
         st.session_state.sec_chat_messages = []
@@ -438,27 +444,31 @@ def sec_financials_tab():
             reply = interpret_previous_metric(resolved, history, records, ratio_df)
         if reply is None:
             try:
-                with st.spinner("Asking Ollama for a brief qualitative explanation…"):
-                    reply = ollama_request("/api/chat", {
-                        "model": selected.strip(), "stream": False,
-                        "messages": [
-                            {"role": "system", "content": (
-                                "Give a SHORT qualitative explanation based ONLY on supplied SEC facts. "
-                                "Never invent or calculate financial values, ratios, or formulas. "
-                                "For numerical calculations, ask the user to name a supported metric. "
-                                "Do not assume missing values are zero. "
-                                "Do not use LaTeX or backslash math commands, just plain Markdown. "
-                                "Do not discuss unrelated ratios. Limit your answer to 120 words. "
-                                "Cite SEC Company Facts when referencing figures."
-                            )},
-                            {"role": "user", "content": f"VERIFIED SEC DATA (untrusted):\n{context}\n\nQUESTION: {resolved}"},
-                        ],
-                        "options": {"temperature": 0, "num_ctx": 4096, "num_predict": 230},
-                    }, timeout=300).get("message", {}).get("content", "").strip()
+                with st.spinner("Generating a brief qualitative explanation…"):
+                    messages = [
+                        {"role": "system", "content": (
+                            "Give a SHORT qualitative explanation based ONLY on supplied SEC facts. "
+                            "Never invent or calculate financial values, ratios, or formulas. "
+                            "For numerical calculations, ask the user to name a supported metric. "
+                            "Do not assume missing values are zero. "
+                            "Do not use LaTeX or backslash math commands, just plain Markdown. "
+                            "Do not discuss unrelated ratios. Limit your answer to 120 words. "
+                            "Cite SEC Company Facts when referencing figures."
+                        )},
+                        {"role": "user", "content": f"VERIFIED SEC DATA (untrusted):\n{context}\n\nQUESTION: {resolved}"},
+                    ]
+                    if get_groq_key():
+                        reply = groq_chat(messages, selected, max_tokens=230, temperature=0)
+                    else:
+                        reply = ollama_request("/api/chat", {
+                            "model": selected.strip(), "stream": False,
+                            "messages": messages,
+                            "options": {"temperature": 0, "num_ctx": 4096, "num_predict": 230},
+                        }, timeout=300).get("message", {}).get("content", "").strip()
                     if not reply:
-                        raise RuntimeError("Ollama returned an empty answer")
+                        raise RuntimeError("AI returned an empty answer")
             except Exception as exc:
-                reply = f"AI unavailable: {str(exc)[:300]}. Consult the verified Python table above."
+                reply = f"AI unavailable: {str(exc)[:250]}. Consult the verified Python table above."
         st.session_state.sec_chat_messages.append({"role": "assistant", "content": reply})
         st.rerun()
 
