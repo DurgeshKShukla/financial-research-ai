@@ -1,0 +1,12 @@
+# Tested dependency constraints for Python 3.11 on Intel macOS (x86_64).
+# Do not upgrade NumPy to 2.x while using torch 2.2.2 on this environment.
+numpy==1.26.4
+pandas==2.2.3
+pyarrow==17.0.0
+torch==2.2.2
+sentence-transformers==3.4.1
+transformers==4.44.2
+faiss-cpu>=1.9,<2
+PyMuPDF==1.26.7
+streamlit>=1.40,<2
+altair>=5,<7
