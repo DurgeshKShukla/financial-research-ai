@@ -37,7 +37,7 @@ def groq_model() -> str:
 
 
 def groq_chat(messages: list[dict], model: str | None = None,
-              *, max_tokens: int = 650, temperature: float = 0.05,
+              *, max_tokens: int = 1500, temperature: float = 0.05,
               timeout: int = 90) -> str:
     key = get_groq_key()
     if not key:
