@@ -178,7 +178,7 @@ def generate_answer(question: str, passages, model_name: str, history, *, novelt
         {"role": "user", "content": question_context},
     ]
     if get_groq_key():
-        answer = groq_chat(messages, model_name, max_tokens=650, temperature=0.05)
+        answer = groq_chat(messages, model_name, max_tokens=1500, temperature=0.05)
         if not answer:
             raise RuntimeError("Hosted model returned an empty answer.")
         return answer
@@ -449,6 +449,7 @@ def sec_financials_tab():
                     messages = [
                         {"role": "system", "content": (
                             "Give a SHORT qualitative explanation based ONLY on supplied SEC facts. "
+                            "If the question is unclear or appears to be a typo, briefly ask the user to clarify. "
                             "Never invent or calculate financial values, ratios, or formulas. "
                             "For numerical calculations, ask the user to name a supported metric. "
                             "Do not assume missing values are zero. "
@@ -459,7 +460,7 @@ def sec_financials_tab():
                         {"role": "user", "content": f"VERIFIED SEC DATA (untrusted):\n{context}\n\nQUESTION: {resolved}"},
                     ]
                     if get_groq_key():
-                        reply = groq_chat(messages, selected, max_tokens=230, temperature=0)
+                        reply = groq_chat(messages, selected, max_tokens=1500, temperature=0)
                     else:
                         reply = ollama_request("/api/chat", {
                             "model": selected.strip(), "stream": False,

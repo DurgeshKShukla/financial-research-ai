@@ -42,13 +42,41 @@ def groq_chat(messages: list[dict], model: str | None = None,
     key = get_groq_key()
     if not key:
         raise RuntimeError("GROQ_API_KEY is not configured in Streamlit Cloud secrets.")
-    payload = json.dumps({
-        "model": model or groq_model(),
+    selected_model = model or groq_model()
+    is_reasoning_model = selected_model in {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}
+    if not isinstance(max_tokens, int) or max_tokens < 1:
+        raise ValueError("max_tokens must be a positive integer.")
+    # GPT-OSS uses completion tokens for reasoning as well as its final answer.
+    # A tiny caller override must not consume the entire budget before visible output.
+    budget = max(max_tokens, 1500) if is_reasoning_model else max_tokens
+    body = {
+        "model": selected_model,
         "messages": messages,
         "temperature": temperature,
-        "max_completion_tokens": max_tokens,
+        "max_completion_tokens": budget,
         "stream": False,
-    }).encode("utf-8")
+    }
+    if is_reasoning_model:
+        body["reasoning_effort"] = "low"
+    data = _groq_request(body, key, timeout)
+    answer, finish_reason = _answer(data)
+    if answer:
+        return answer
+    # Retry once only when the provider explicitly reports budget exhaustion.
+    # Do not retry rate limits or authentication/network errors automatically.
+    if is_reasoning_model and finish_reason == "length" and budget < 3000:
+        body["max_completion_tokens"] = min(budget * 2, 3000)
+        data = _groq_request(body, key, timeout)
+        answer, finish_reason = _answer(data)
+        if answer:
+            return answer
+    if finish_reason == "length":
+        raise RuntimeError("The model exhausted its response token budget before producing an answer. Try a shorter, specific question.")
+    raise RuntimeError("The hosted model returned no answer text. Try again or ask a specific financial question.")
+
+
+def _groq_request(body: dict, key: str, timeout: int) -> dict:
+    payload = json.dumps(body).encode("utf-8")
     request = Request(GROQ_URL, data=payload, headers={
     "Authorization": f"Bearer {key}",
     "Content-Type": "application/json",
@@ -67,7 +95,16 @@ def groq_chat(messages: list[dict], model: str | None = None,
         raise RuntimeError(f"Hosted AI request failed (HTTP {exc.code}). Verify the model and account.") from exc
     except (URLError, TimeoutError) as exc:
         raise RuntimeError("Could not connect to the hosted AI provider.") from exc
+    return data
+
+
+def _answer(data: dict) -> tuple[str, str | None]:
+    """Read only final answer content; never display the model's reasoning field."""
     try:
-        return (data["choices"][0]["message"]["content"] or "").strip()
-    except (KeyError, IndexError, TypeError) as exc:
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
+        if content is not None and not isinstance(content, str):
+            raise TypeError("Unexpected content type")
+        return (content or "").strip(), choice.get("finish_reason")
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
         raise RuntimeError("Hosted AI response format was not recognised.") from exc
