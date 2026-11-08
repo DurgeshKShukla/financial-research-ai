@@ -3,7 +3,9 @@ import hashlib
 import hmac
 import os
 import time
-from datetime import date
+from datetime import date, timedelta
+from zoneinfo import ZoneInfo
+from datetime import datetime
 import streamlit as st
 from news_store import list_posts, save_post, delete_post, StorageError
 
@@ -29,6 +31,21 @@ def cached_posts(repo, branch, token):
     return list_posts(dict(repo=repo, branch=branch, token=token))
 
 
+def show_news_headline(post):
+    """Keep the date visible beside a collapsed, clickable article headline."""
+    date_column, article_column = st.columns([1, 5])
+    with date_column:
+        st.markdown('**' + date.fromisoformat(post['published_date']).strftime('%d %b %Y') + '**')
+    with article_column:
+        with st.expander(post['headline'], expanded=False):
+            st.markdown(post['body'])
+            if post['analysis']:
+                st.markdown('**My analysis — why this matters**')
+                st.markdown(post['analysis'])
+            if post['source_url']:
+                st.link_button('Read original source', post['source_url'])
+
+
 def daily_news_tab():
     st.subheader('📰 Daily Financial News')
     st.caption('Daily updates and commentary by Durgesh Shukla')
@@ -43,18 +60,30 @@ def daily_news_tab():
         return
     if not posts:
         st.info('The first news update is coming soon.')
-    page_count = max(1, (len(posts) + 9) // 10)
-    page = st.selectbox('News page', range(1, page_count + 1)) if page_count > 1 else 1
-    for post in posts[(page-1)*10:page*10]:
-        with st.container(border=True):
-            st.subheader(post['headline'])
-            st.caption(post['published_date'])
-            st.markdown(post['body'])
-            if post['analysis']:
-                st.markdown('**My analysis — why this matters**')
-                st.markdown(post['analysis'])
-            if post['source_url']:
-                st.link_button('Read original source', post['source_url'])
+    today = datetime.now(ZoneInfo('Europe/Dublin')).date()
+    cutoff = today - timedelta(days=9)
+    recent = [p for p in posts if cutoff.isoformat() <= p['published_date'] <= today.isoformat()]
+    older = [p for p in posts if p['published_date'] < cutoff.isoformat()]
+    st.caption('Latest 10 days · newest first · click a headline to read')
+    if posts and not recent:
+        st.info('No articles in the last 10 days. Browse the archive below.')
+    for post in recent:
+        show_news_headline(post)
+    if older:
+        st.divider()
+        with st.expander('📅 Past articles — choose a date'):
+            archive_dates = sorted({date.fromisoformat(p['published_date']) for p in older})
+            st.caption('Choose a date in the calendar to see that day’s headlines.')
+            selected_day = st.date_input(
+                'Archive date', value=archive_dates[-1],
+                min_value=archive_dates[0], max_value=cutoff - timedelta(days=1),
+                key='news_archive_date', format='DD/MM/YYYY',
+            )
+            matching = [p for p in older if p['published_date'] == selected_day.isoformat()]
+            if not matching:
+                st.info('No articles were published on this date. Choose another day.')
+            for post in matching:
+                show_news_headline(post)
     with st.expander('Admin — manage news'):
         expected = setting('NEWS_ADMIN_PASSWORD')
         if not expected:
