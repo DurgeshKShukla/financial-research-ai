@@ -17,6 +17,7 @@ from sec_financials import lookup_ticker, get_company_data, annual_financials, l
 from finance_analytics import compute_financial_ratios, simple_cashflow_dcf, financial_prompt_context
 from financial_guardrails import verified_answer, explain_previous_calculation, resolve_followup_question, determine_metric, interpret_previous_metric
 from history_store import save_session, list_sessions
+from news_ui import daily_news_tab
 from ai_backend import get_groq_key, groq_chat, groq_model, groq_key_configured
 from pdf_retrieval import (
     wants_new_findings, broad_findings_question, topic_queries,
@@ -278,19 +279,19 @@ def pdf_chat_tab():
             )
         except Exception as exc:
             st.error(f"Could not read this PDF: {exc}")
-            st.stop()
+            return
 
     chunks = st.session_state.chunks
     if not chunks:
         st.error("No extractable text was found. Scanned pages may require OCR.")
-        st.stop()
+        return
 
     st.caption(f"📄 {uploaded.name}  ·  {st.session_state.page_count} PDF pages  ·  {len(chunks)} indexed passages")
     try:
         index = create_index(file_hash, chunks)
     except Exception as exc:
         st.error(f"Could not create semantic search index: {exc}")
-        st.stop()
+        return
 
     if not st.session_state.messages:
         st.markdown("**Try one of these questions:**")
@@ -522,8 +523,11 @@ def sec_financials_tab():
     st.markdown(f"[View SEC submissions](https://data.sec.gov/submissions/CIK{company['cik']:010d}.json) · [View SEC XBRL Company Facts](https://data.sec.gov/api/xbrl/companyfacts/CIK{company['cik']:010d}.json)")
 
 
-sec_tab, pdf_tab = st.tabs(["📊 SEC + Analytics", "💬 PDF Research Chat"])
+sec_tab, pdf_tab, news_tab = st.tabs(["📊 SEC + Analytics", "💬 PDF Research Chat", "📰 Daily Financial News"])
 with sec_tab:
     sec_financials_tab()
 with pdf_tab:
     pdf_chat_tab()
+
+with news_tab:
+    daily_news_tab()
