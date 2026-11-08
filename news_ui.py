@@ -84,7 +84,10 @@ def daily_news_tab():
                 st.info('No articles were published on this date. Choose another day.')
             for post in matching:
                 show_news_headline(post)
-    with st.expander('Admin — manage news'):
+    # URL flag reveals the login only; password checks still protect every write.
+    if st.query_params.get('admin') != '1':
+        return
+    with st.expander('Publisher access', expanded=True):
         expected = setting('NEWS_ADMIN_PASSWORD')
         if not expected:
             st.caption('Publishing is disabled until NEWS_ADMIN_PASSWORD is configured in private settings.')
@@ -106,6 +109,9 @@ def daily_news_tab():
             return
         if st.button('Log out', key='news_logout'):
             st.session_state.pop('news_admin_token', None)
+            st.session_state.pop('news_admin_until', None)
+            if 'admin' in st.query_params:
+                del st.query_params['admin']
             st.rerun()
         st.caption('Admin session expires after one hour. All submitted posts are public immediately.')
         choices = {p['id']: p for p in posts}
