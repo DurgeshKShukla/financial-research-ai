@@ -37,7 +37,7 @@ def groq_model() -> str:
 
 
 def groq_chat(messages: list[dict], model: str | None = None,
-              *, max_tokens: int = 1500, temperature: float = 0.05,
+              *, max_tokens: int = 3000, temperature: float = 0.05,
               timeout: int = 90) -> str:
     key = get_groq_key()
     if not key:
@@ -48,7 +48,7 @@ def groq_chat(messages: list[dict], model: str | None = None,
         raise ValueError("max_tokens must be a positive integer.")
     # GPT-OSS uses completion tokens for reasoning as well as its final answer.
     # A tiny caller override must not consume the entire budget before visible output.
-    budget = max(max_tokens, 1500) if is_reasoning_model else max_tokens
+    budget = max(max_tokens, 3000) if is_reasoning_model else max_tokens
     body = {
         "model": selected_model,
         "messages": messages,
